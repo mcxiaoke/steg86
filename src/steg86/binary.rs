@@ -221,15 +221,22 @@ impl Text {
         let mut commutative_count = 0;
         let mut offsets = Vec::new();
         let mut decoder = Decoder::new(self.bitness, &self.data, DecoderOptions::NONE);
+        let mut invalid_count = 0usize;
 
         for instruction in &mut decoder {
-            // Iterating over the decoder yields Code::INVALID on errors, so handle them first.
+            // iced-x86 在遇到无法解码为合法指令的字节时会给出 Code::INVALID，例如
+            // 内嵌在 `.text` 里的数据：Go 的 "Go build ID" 字符串、MSVC 内联的
+            // switch 跳转表、只读常量等。steg86 只关心真实代码里的寄存器-寄存器双指令，
+            // 因此这里跳过这些无效字节继续扫描，而不是整体 Fatal 退出——否则几乎所有
+            // 含有内嵌数据的真实二进制都无法 profile。
+            //
+            // 安全性：被记录的候选指令仍必须满足“特定双指令操作码 + 两个寄存器操作数
+            // (mod=11，即 modRM 字节 >= 0xC0)”。像 ASCII 文本、小相对偏移跳转表这类
+            // 数据不可能包含 >= 0xC0 的 modRM 字节，因此不会产生误判的候选，也就不会
+            // 把数据误当指令改写而破坏宿主二进制。
             if instruction.code() == Code::INVALID {
-                return Err(anyhow!(
-                    "encountered an invalid instruction at text offset {} (file offset {})",
-                    decoder.position(),
-                    self.start_offset + decoder.position(),
-                ));
+                invalid_count += 1;
+                continue;
             }
 
             icount += 1;
@@ -285,6 +292,11 @@ impl Text {
                 pair_count + commutative_count,
             ));
         }
+
+        log::debug!(
+            "skipped {} invalid instructions (data embedded in .text?) while profiling",
+            invalid_count
+        );
 
         Ok(StegProfile {
             instruction_count: icount,

@@ -18,9 +18,24 @@ push = true
 [dependencies]
 anyhow = "1.0"
 bit-vec = "0.9"
-clap = "4.6"
-env_logger = "0.11"
+# steg86 使用 clap 的 builder API，仅需要 help/usage 输出；
+# 不需要 suggestions / error-context / color 等额外体积。
+clap = { version = "4.6", default-features = false, features = ["std", "help", "usage"] }
+# 只做 RUST_LOG=level 的基础过滤，关掉 regex（避免引入整个 regex crate）、
+# humantime、auto-color（anstream/anstyle）等未用到的体积。
+env_logger = { version = "0.11", default-features = false }
+# 注意：goblin 的 `Object` 枚举被 gate 在 `te` feature 后，且 mach* 会强制拉入
+# archive/endian_fd，因此无法安全裁剪，保留默认 feature。
 goblin = "0.10"
-iced-x86 = "1.21"
+# steg86 只做指令的编解码（Decoder/Encoder），从不格式化输出，
+# 因此关闭全部格式化器及 instr_info/block_encoder/op_code_info 等重代码。
+iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "encoder"] }
 lazy_static = "1.5"
 log = "0.4"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
